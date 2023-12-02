@@ -36,6 +36,14 @@ class EVOSAC(stitch):
         super(EVOSAC, self).__init__(config)
         self.population = config["population"]
         self.lamb = config["mutation_factor"]
+        if config["1/5-rule"]:
+            self.rule = True
+            self.threshold = config["1/5-rule-threshold"]
+            self.period = config["1/5-rule-iter"]
+            self.alpha = config["1/5-rule-alpha"]
+        else:
+            self.rule = False
+
     
     # a set must not contain duplicate numbers
     def reproduce(self, parent: np.ndarray, match_counts: int):
@@ -62,6 +70,12 @@ class EVOSAC(stitch):
         fits = fits / np.sum(fits)
         parents = self.rng.choice(population, size=(pairs, 2), replace=True, p=fits)
         return parents
+
+    def one_fifth_rule(self, counter):
+        if counter > self.period * self.threshold:
+            self.lamb = self.lamb / self.alpha
+        else:
+            self.lamb = self.lamb * self.alpha
     
     def fit(self, base, addition):
         if self.population % 2:  raise RuntimeError('population must be divisible by 2')
@@ -70,6 +84,9 @@ class EVOSAC(stitch):
         points_base, points_addition = self.expand(base), self.expand(addition)
         threshold = match_counts * self.outlier_rate
         iter, max_inlier, argmax_H = 0, 0, None
+        if self.rule:
+            counter = 0
+            prev_avg_inlier = 0
         population = np.asarray([self.rand_comb(match_counts) for _ in range(self.population)])
         rec = []
         while (match_counts - max_inlier) > threshold and iter <= self.max_iter:
@@ -91,6 +108,14 @@ class EVOSAC(stitch):
                 children[2*i], children[2*i+1] = self.reproduce(parents[i], match_counts)
             population = children
             iter += 1
+
+            if self.rule:
+                if np.average(fits) > prev_avg_inlier:
+                    counter += 1
+                prev_avg_inlier = np.average(fits)
+                if iter % self.period == 0:
+                    self.one_fifth_rule(counter)
+                    counter = 0
         return argmax_H, rec
      
     
@@ -149,7 +174,11 @@ if __name__ == "__main__":
         "outlier_rate": 0.1,
         "max_iter": 500,
         "population": 100,
-        'mutation_factor': 0.5
+        'mutation_factor': 0.5,
+        '1/5-rule': False,
+        '1/5-rule-threshold': 0.1,
+        '1/5-rule-iter': 50,
+        '1/5-rule-alpha': 0.9
     }
     evosac = EVOSAC(EVOSAC_config)
     info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run()
