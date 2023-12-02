@@ -1,11 +1,11 @@
-import os, time, random, cv2
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from utility import stitch
+from base import StitchBase
 
 
-class RANSAC(stitch):
+class RANSAC(StitchBase):
     def __init__(self, config):
         super(RANSAC, self).__init__(config)
     
@@ -31,22 +31,26 @@ class RANSAC(stitch):
         return argmin_H, rec
     
 
-class EVOSAC(stitch):
-    def __init__(self, config):
+class EVOSAC(StitchBase):
+    def __init__(self, config):        
         super(EVOSAC, self).__init__(config)
         self.population = config["population"]
         self.lamb = config["mutation_factor"]
+        if config["strategy"] == 'ROULETTE':
+            self.selection_strategy = self._roulette_selection
+        elif config["strategy"] == 'TOURNAMENT':
+            self.selection_strategy = self._tournament_selection
+
         if config["1/5-rule"]:
-            self.rule = True
+            self._one_fifth_enable = True
             self.threshold = config["1/5-rule-threshold"]
             self.period = config["1/5-rule-iter"]
             self.alpha = config["1/5-rule-alpha"]
         else:
-            self.rule = False
-
+            self._one_fifth_enable = False
     
     # a set must not contain duplicate numbers
-    def reproduce(self, parent: np.ndarray, match_counts: int):
+    def _reproduce(self, parent: np.ndarray, match_counts: int):
         duplicate = True
         # concatenate two chromosome
         combine = parent.flatten()
@@ -66,27 +70,35 @@ class EVOSAC(stitch):
                     break
         return c1, c2
     
-    def roulette_selection(self, population, fits, pairs):
+    def _roulette_selection(self, population, fits, pairs):
         fits = fits / np.sum(fits)
         parents = self.rng.choice(population, size=(pairs, 2), replace=True, p=fits)
         return parents
 
-    def one_fifth_rule(self, counter):
+    def _tournament_selection(self, population, fits, pairs):
+        def _find_one():
+            indices = self.rng.choice(len(fits), size=2, replace=True)
+            return population[indices[0]] if fits[indices[0]] > fits[indices[1]] else population[indices[1]]
+        return np.array([(_find_one(), _find_one()) for _ in range(len(population) >> 1)], dtype=int)
+
+    def _one_fifth(self, counter):
         if counter > self.period * self.threshold:
             self.lamb = self.lamb / self.alpha
         else:
             self.lamb = self.lamb * self.alpha
     
     def fit(self, base, addition):
-        if self.population % 2:  raise RuntimeError('population must be divisible by 2')
+        if self.population & 1:  
+            raise RuntimeError('population must be divisible by 2')
     
         match_counts = base.shape[0]
         points_base, points_addition = self.expand(base), self.expand(addition)
         threshold = match_counts * self.outlier_rate
         iter, max_inlier, argmax_H = 0, 0, None
-        if self.rule:
+        if self._one_fifth_enable:
             counter = 0
             prev_avg_inlier = 0
+
         population = np.asarray([self.rand_comb(match_counts) for _ in range(self.population)])
         rec = []
         while (match_counts - max_inlier) > threshold and iter <= self.max_iter:
@@ -100,25 +112,25 @@ class EVOSAC(stitch):
                 max_inlier = fits[argmax_fit]
                 argmax_H = Hs[argmax_fit]
 
-            parents = self.roulette_selection(population, fits, population.shape[0] // 2)
+            parents = self.selection_strategy(population, fits, population.shape[0] // 2)
             
             # TODO: mutation
             children = np.empty_like(population, dtype=population.dtype)
             for i in range(parents.shape[0]):
-                children[2*i], children[2*i+1] = self.reproduce(parents[i], match_counts)
+                children[2*i], children[2*i+1] = self._reproduce(parents[i], match_counts)
             population = children
             iter += 1
 
-            if self.rule:
+            if self._one_fifth_enable:
                 if np.average(fits) > prev_avg_inlier:
                     counter += 1
                 prev_avg_inlier = np.average(fits)
                 if iter % self.period == 0:
-                    self.one_fifth_rule(counter)
+                    self._one_fifth(counter)
                     counter = 0
         return argmax_H, rec
-     
-    
+
+
 def plot(info):
     gs = gridspec.GridSpec(4, 6)
 
@@ -147,12 +159,12 @@ def plot(info):
         
     plt.savefig("result.png", dpi=300)
     plt.show()
- 
+
 
 if __name__ == "__main__":
     # To change rendering mode, please refer to stitch.wrap_imgs()
     info = {}
-    RANSAC_config = {
+    ransac_config = {
         "folder": "./baseline",
         # Since the complexity of match finding is O(N1N2), where Ni is number of key-points.
         # If the image resolution is higher, number of key-points grows too
@@ -163,23 +175,26 @@ if __name__ == "__main__":
         "outlier_rate": 0.1,
         "max_iter": 500
     }
-    ransac = RANSAC(RANSAC_config)
+    print('Running RANSAC...', time.time())
+    ransac = RANSAC(ransac_config)
     info["RANSAC_IMG"], info["RANSAC_REC"], info["RANSAC_TIME"] = ransac.run()
     
-    EVOSAC_config = {
+    evosac_config = {
         "folder": "./baseline",
         "size": None,
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
-        "max_iter": 500,
-        "population": 100,
+        "max_iter": 100,
+        "population": 50,
         'mutation_factor': 0.5,
         '1/5-rule': False,
         '1/5-rule-threshold': 0.1,
         '1/5-rule-iter': 50,
-        '1/5-rule-alpha': 0.9
+        '1/5-rule-alpha': 0.9,
+        'strategy': 'TOURNAMENT'
     }
-    evosac = EVOSAC(EVOSAC_config)
+    print('Running EVOSAC...', time.time())
+    evosac = EVOSAC(evosac_config)
     info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run()
     plot(info)

@@ -3,7 +3,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 
-class stitch(ABC):
+class StitchBase(ABC):
     def __init__(self, config):
         self.rng = np.random.default_rng(0)
         folder = config["folder"]
