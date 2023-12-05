@@ -29,12 +29,11 @@ class RANSAC(StitchBase):
                 min_outlier = outlier_cnt
                 argmin_H = temp_H
         return argmin_H, rec
-    
+
 
 class EVOSAC(StitchBase):
     def __init__(self, config):        
         super(EVOSAC, self).__init__(config)
-        self.population = config["population"]
         self.lamb = config["mutation_factor"]
         if config["strategy"] == 'ROULETTE':
             self.selection_strategy = self._roulette_selection
@@ -76,10 +75,11 @@ class EVOSAC(StitchBase):
         return parents
 
     def _tournament_selection(self, population, fits, pairs):
+        sz = population.shape[0]
         def _find_one():
-            indices = self.rng.choice(len(fits), size=2, replace=True)
+            indices = self.rng.choice(sz, size=2, replace=True)
             return population[indices[0]] if fits[indices[0]] > fits[indices[1]] else population[indices[1]]
-        return np.array([(_find_one(), _find_one()) for _ in range(len(population) >> 1)], dtype=int)
+        return np.array([(_find_one(), _find_one()) for _ in range(sz >> 1)], dtype=int)
 
     def _one_fifth(self, counter):
         if counter > self.period * self.threshold:
@@ -88,9 +88,6 @@ class EVOSAC(StitchBase):
             self.lamb = self.lamb * self.alpha
     
     def fit(self, base, addition):
-        if self.population & 1:  
-            raise RuntimeError('population must be divisible by 2')
-    
         match_counts = base.shape[0]
         points_base, points_addition = self.expand(base), self.expand(addition)
         threshold = match_counts * self.outlier_rate
@@ -99,7 +96,8 @@ class EVOSAC(StitchBase):
             counter = 0
             prev_avg_inlier = 0
 
-        population = np.asarray([self.rand_comb(match_counts) for _ in range(self.population)])
+        # initialize the population with reshaped random permutation of range(match_counts)
+        population = self.rng.choice(match_counts, size=match_counts // 4 * 4, replace=False).reshape(-1, 4)
         rec = []
         while (match_counts - max_inlier) > threshold and iter <= self.max_iter:
             # print(iter)
@@ -115,10 +113,10 @@ class EVOSAC(StitchBase):
             parents = self.selection_strategy(population, fits, population.shape[0] // 2)
             
             # TODO: mutation
-            children = np.empty_like(population, dtype=population.dtype)
+            # children = np.empty_like(population, dtype=population.dtype)
             for i in range(parents.shape[0]):
-                children[2*i], children[2*i+1] = self._reproduce(parents[i], match_counts)
-            population = children
+                population[2*i], population[2*i+1] = self._reproduce(parents[i], match_counts)
+            # population = children
             iter += 1
 
             if self._one_fifth_enable:
@@ -164,29 +162,27 @@ def plot(info):
 if __name__ == "__main__":
     # To change rendering mode, please refer to stitch.wrap_imgs()
     info = {}
+    # Since the complexity of match finding is O(N1N2), where Ni is number of key-points.
+    # If the image resolution is higher, number of key-points grows too
+    # In this case, just lower the resolution would be fine
+    folder, size = "./baseline", None   # resolution (h, w), use None to perserve the original size
     ransac_config = {
-        "folder": "./baseline",
-        # Since the complexity of match finding is O(N1N2), where Ni is number of key-points.
-        # If the image resolution is higher, number of key-points grows too
-        # In this case, just lower the resolution would be fine
-        "size": None, # resolution (h, w), use None to perserve the original size
+        "seed": 0,
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
-        "max_iter": 500
+        "max_iter": 1000
     }
     print('Running RANSAC...', time.time())
     ransac = RANSAC(ransac_config)
-    info["RANSAC_IMG"], info["RANSAC_REC"], info["RANSAC_TIME"] = ransac.run()
-    
+    info["RANSAC_IMG"], info["RANSAC_REC"], info["RANSAC_TIME"] = ransac.run(folder, size)
+
     evosac_config = {
-        "folder": "./baseline",
-        "size": None,
+        "seed": 0,
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
         "max_iter": 100,
-        "population": 50,
         'mutation_factor': 0.5,
         '1/5-rule': False,
         '1/5-rule-threshold': 0.1,
@@ -196,5 +192,5 @@ if __name__ == "__main__":
     }
     print('Running EVOSAC...', time.time())
     evosac = EVOSAC(evosac_config)
-    info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run()
+    info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run(folder, size)
     plot(info)

@@ -5,22 +5,23 @@ from abc import ABC, abstractmethod
 
 class StitchBase(ABC):
     def __init__(self, config):
-        self.rng = np.random.default_rng(0)
-        folder = config["folder"]
-        if config["size"]:  self.RGB = np.stack([cv2.resize(cv2.imread(f"{folder}/{img}"), config["size"]) for img in os.listdir(folder)])
-        else:               self.RGB = np.stack([cv2.imread(f"{folder}/{img}") for img in os.listdir(folder)])
-        
+        self.rng = np.random.default_rng(config["seed"])     
         self.ratio_test = config["ratio_test"]
         self.tolerance = config["tolerance"]
         self.outlier_rate = config["outlier_rate"]
         self.max_iter = config["max_iter"]
-    
+
+    @staticmethod
+    def read_img(folder, size):
+        if size is not None:    return np.stack([cv2.resize(cv2.imread(f"{folder}/{img}"), size) for img in os.listdir(folder)])
+        else:                   return np.stack([cv2.imread(f"{folder}/{img}") for img in os.listdir(folder)])
+
     @staticmethod
     def expand(points):
         return np.vstack([points.T, np.ones_like(points.T[-1])])
     
     def rand_comb(self, n, r=4):
-        return sorted(self.rng.choice(range(n), r, replace=False))
+        return sorted(self.rng.choice(n, r, replace=False))
     
     @staticmethod
     def SIFT_img(img):
@@ -37,7 +38,7 @@ class StitchBase(ABC):
                                 signature="(n),(m,n)->(m)")(f1, f2)
         # get two highest index and value of similarity
         two_lowest_index = np.argpartition(similarity, 2)[:, :2]
-        two_lowest_value = np.vectorize(lambda s, i: s[i], signature="(n),(m)->(m)")(similarity, two_lowest_index)
+        two_lowest_value = np.take_along_axis(similarity, two_lowest_index, axis=1)
         # ratio test
         good_match = two_lowest_value[:, 0] < self.ratio_test * two_lowest_value[:, 1]
         # generate matching matrix based on good_match
@@ -126,12 +127,13 @@ class StitchBase(ABC):
     def fit(self, base, addition):
         raise NotImplementedError
     
-    def run(self):
+    def run(self, folder, size=None):
+        RGB = self.read_img(folder, size)
         t = time.time()
         
-        base_img = self.RGB[0]
+        base_img = RGB[0]
         recs = []
-        for img in self.RGB[1:]:
+        for img in RGB[1:]:
             kpts_base, feature_base = self.SIFT_img(base_img)
             kpts_addition, feature_addition = self.SIFT_img(img)
 
