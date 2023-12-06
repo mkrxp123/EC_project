@@ -160,18 +160,22 @@ def plot(info):
 
 
 if __name__ == "__main__":
-    # To change rendering mode, please refer to stitch.wrap_imgs()
     info = {}
     # Since the complexity of match finding is O(N1N2), where Ni is number of key-points.
     # If the image resolution is higher, number of key-points grows too
     # In this case, just lower the resolution would be fine
     folder, size = "./baseline", None   # resolution (h, w), use None to perserve the original size
+    
+    # True to use cv2.addWeight, False to use my own method
+    blending_cv2 = False
+    
     ransac_config = {
         "seed": 0,
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
-        "max_iter": 1000
+        "max_iter": 1000,
+        "blending_cv2": blending_cv2
     }
     print('Running RANSAC...', time.time())
     ransac = RANSAC(ransac_config)
@@ -188,7 +192,8 @@ if __name__ == "__main__":
         '1/5-rule-threshold': 0.1,
         '1/5-rule-iter': 50,
         '1/5-rule-alpha': 0.9,
-        'strategy': 'TOURNAMENT'
+        'strategy': 'TOURNAMENT',
+        "blending_cv2": blending_cv2
     }
     print('Running EVOSAC...', time.time())
     evosac = EVOSAC(evosac_config)

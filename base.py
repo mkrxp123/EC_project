@@ -10,6 +10,7 @@ class StitchBase(ABC):
         self.tolerance = config["tolerance"]
         self.outlier_rate = config["outlier_rate"]
         self.max_iter = config["max_iter"]
+        self.use_cv2 = config["blending_cv2"]
 
     @staticmethod
     def read_img(folder, size):
@@ -88,7 +89,14 @@ class StitchBase(ABC):
         return img_3
     
     @staticmethod
-    def wrap_imgs(H, addition, base):
+    def img_processing(img_1, img_2):
+        gray_1, gray_2, mask_1, mask_2, mask_all = StitchBase.img_mask(img_1, img_2)
+        img_3 = img_1.copy()
+        img_3[mask_2] = img_2[mask_2]
+        img_3 = StitchBase.gap_blend(img_1, img_2, img_3, gray_1, gray_2, mask_all)
+        return img_3
+    
+    def wrap_imgs(self, H, addition, base):
         h1, w1, _ = addition.shape
         h2, w2, _ = base.shape
         corners = cv2.perspectiveTransform(np.float32([[0, 0], [w1, 0], [0, h1], [w1, h1]]).reshape(-1, 1, 2), H).squeeze()
@@ -113,15 +121,8 @@ class StitchBase(ABC):
         img_1 = cv2.warpPerspective(base, A, (new_w, new_h))
         img_2 = cv2.warpPerspective(addition, A @ H, (new_w, new_h))
         
-        # use this to debug
-        return cv2.addWeighted(img_1, 0.5, img_2, 0.5, 0)
-
-        # use this to do image blending
-        gray_1, gray_2, mask_1, mask_2, mask_all = img_mask(img_1, img_2)
-        img_3 = img_1.copy()
-        img_3[mask_2] = img_2[mask_2]
-        img_3 = gap_blend(img_1, img_2, img_3, gray_1, gray_2, mask_all)
-        return img_3
+        if self.use_cv2:    return cv2.addWeighted(img_1, 0.5, img_2, 0.5, 0)
+        else:               return self.img_processing(img_1, img_2)
     
     @abstractmethod
     def fit(self, base, addition):
