@@ -97,18 +97,18 @@ class EVOSAC(StitchBase):
             prev_avg_inlier = 0
 
         # initialize the population with reshaped random permutation of range(match_counts)
-        population = self.rng.choice(match_counts, size=match_counts // 4 * 4, replace=False).reshape(-1, 4)
+        step = match_counts // 4
+        population = self.rng.choice(match_counts, size=(step, 4), replace=False)
+        fits = np.empty(step, dtype=np.uint32)
         rec = []
         while (match_counts - max_inlier) > threshold and iter <= self.max_iter:
-            # print(iter)
-            Hs = [self.homography(points_addition.T[points, :2], points_base.T[points, :2]) for points in population]
-            fits = [match_counts - self.calculate_outlier(H, points_addition, points_base) for H in Hs]
-            argmax_fit = np.argmax(fits)
-            rec.append(match_counts - fits[argmax_fit])
-
-            if fits[argmax_fit] > max_inlier:
-                max_inlier = fits[argmax_fit]
-                argmax_H = Hs[argmax_fit]
+            for i in range(step):
+                H = self.homography(points_addition.T[population[i], :2], points_base.T[population[i], :2])
+                fits[i] = match_counts - self.calculate_outlier(H, points_addition, points_base)
+                if fits[i] > max_inlier:
+                    argmax_i, argmax_H = i, H
+                    max_inlier = fits[i]
+            rec.append(match_counts - fits[argmax_i])
 
             parents = self.selection_strategy(population, fits, population.shape[0] // 2)
             
@@ -117,7 +117,7 @@ class EVOSAC(StitchBase):
             for i in range(parents.shape[0]):
                 population[2*i], population[2*i+1] = self._reproduce(parents[i], match_counts)
             # population = children
-            iter += 1
+            iter += step
 
             if self._one_fifth_enable:
                 if np.average(fits) > prev_avg_inlier:
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
-        "max_iter": 1000,
+        "max_iter": 10000,
         "blending_cv2": blending_cv2
     }
     print('Running RANSAC...', time.time())
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         "ratio_test": 0.7,
         'tolerance': 4,
         "outlier_rate": 0.1,
-        "max_iter": 100,
+        "max_iter": 10000,
         'mutation_factor': 0.5,
         '1/5-rule': False,
         '1/5-rule-threshold': 0.1,
