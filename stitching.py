@@ -23,7 +23,7 @@ class RANSAC(StitchBase):
             test_points = temp_H @ points_addition
             test_points = test_points / np.where(test_points[2] != 0, test_points[2], 1)
             outlier_cnt = (np.linalg.norm(points_base[:2] - test_points[:2], axis=0) > self.tolerance).sum()
-            rec.append(outlier_cnt)
+            rec.append(outlier_cnt / match_counts)
             iter += 1
             if outlier_cnt < min_outlier:
                 min_outlier = outlier_cnt
@@ -35,6 +35,7 @@ class EVOSAC(StitchBase):
     def __init__(self, config):        
         super(EVOSAC, self).__init__(config)
         self.lamb = config["mutation_factor"]
+        self.mutation_rate = config["mutation_rate"]
         if config["strategy"] == 'ROULETTE':
             self.selection_strategy = self._roulette_selection
         elif config["strategy"] == 'TOURNAMENT':
@@ -47,6 +48,10 @@ class EVOSAC(StitchBase):
             self.alpha = config["1/5-rule-alpha"]
         else:
             self._one_fifth_enable = False
+
+        if config["early_stop"]:
+            self._early_stop_enable = True
+            self.early_stop_threshold = config["early_stop-threshold"]
     
     # a set must not contain duplicate numbers
     def _reproduce(self, parent: np.ndarray, match_counts: int):
@@ -58,8 +63,11 @@ class EVOSAC(StitchBase):
             # shuffle
             # cut the whole array in half
             # check whether each half contains duplicate numbers
-            random = self.rng.choice(range(match_counts), self.rng.poisson(self.lamb, 1)[0], replace=False)
-            mutation = np.concatenate([combine, random])
+            if self.rng.random() < self.mutation_rate:
+                random = self.rng.choice(range(match_counts), self.rng.poisson(self.lamb, 1)[0], replace=False)
+                mutation = np.concatenate([combine, random])
+            else:
+                mutation = combine
             self.rng.shuffle(mutation)
             c1, c2 = sorted(mutation[0:4]), sorted(mutation[4:8])
             duplicate = False
@@ -91,6 +99,8 @@ class EVOSAC(StitchBase):
         match_counts = base.shape[0]
         points_base, points_addition = self.expand(base), self.expand(addition)
         threshold = match_counts * self.outlier_rate
+        eps = 0.01
+        best_counter = 0
         iter, max_inlier, argmax_H = 0, 0, None
         if self._one_fifth_enable:
             counter = 0
@@ -101,14 +111,14 @@ class EVOSAC(StitchBase):
         population = self.rng.choice(match_counts, size=(step, 4), replace=False)
         fits = np.empty(step, dtype=np.uint32)
         rec = []
-        while (match_counts - max_inlier) > threshold and iter <= self.max_iter:
+        while (match_counts - max_inlier) > threshold and iter <= self.max_iter and best_counter < self.early_stop_threshold:
             for i in range(step):
                 H = self.homography(points_addition.T[population[i], :2], points_base.T[population[i], :2])
                 fits[i] = match_counts - self.calculate_outlier(H, points_addition, points_base)
                 if fits[i] > max_inlier:
                     argmax_i, argmax_H = i, H
                     max_inlier = fits[i]
-            rec.append(match_counts - fits[argmax_i])
+            rec.append((match_counts - fits[argmax_i]) / match_counts)
 
             parents = self.selection_strategy(population, fits, population.shape[0] // 2)
             
@@ -118,6 +128,11 @@ class EVOSAC(StitchBase):
                 population[2*i], population[2*i+1] = self._reproduce(parents[i], match_counts)
             # population = children
             iter += step
+
+            if rec[-1] - max_inlier / match_counts <= eps:
+                best_counter += 1
+            else:
+                best_counter = 0
 
             if self._one_fifth_enable:
                 if np.average(fits) > prev_avg_inlier:
@@ -164,7 +179,7 @@ if __name__ == "__main__":
     # Since the complexity of match finding is O(N1N2), where Ni is number of key-points.
     # If the image resolution is higher, number of key-points grows too
     # In this case, just lower the resolution would be fine
-    folder, size = "./baseline", None   # resolution (h, w), use None to perserve the original size
+    folder, size = "./baseline", (720, 480)   # resolution (h, w), use None to perserve the original size
     
     # True to use cv2.addWeight, False to use my own method
     blending_cv2 = False
@@ -173,7 +188,7 @@ if __name__ == "__main__":
         "seed": 0,
         "ratio_test": 0.7,
         'tolerance': 4,
-        "outlier_rate": 0.1,
+        "outlier_rate": 0.3,
         "max_iter": 10000,
         "blending_cv2": blending_cv2
     }
@@ -185,13 +200,16 @@ if __name__ == "__main__":
         "seed": 0,
         "ratio_test": 0.7,
         'tolerance': 4,
-        "outlier_rate": 0.1,
+        "outlier_rate": 0.3,
         "max_iter": 10000,
         'mutation_factor': 0.5,
+        'mutation_rate': 0.3,
         '1/5-rule': False,
         '1/5-rule-threshold': 0.1,
         '1/5-rule-iter': 50,
         '1/5-rule-alpha': 0.9,
+        'early_stop': True,
+        'early_stop-threshold': 10,
         'strategy': 'TOURNAMENT',
         "blending_cv2": blending_cv2
     }
@@ -199,3 +217,4 @@ if __name__ == "__main__":
     evosac = EVOSAC(evosac_config)
     info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run(folder, size)
     plot(info)
+    print(info["EVOSAC_REC"])
