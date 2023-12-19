@@ -1,3 +1,4 @@
+import pickle
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -52,6 +53,9 @@ class EVOSAC(StitchBase):
         if config["early_stop"]:
             self._early_stop_enable = True
             self.early_stop_threshold = config["early_stop-threshold"]
+        else:
+            self._early_stop_enable = False
+            self.early_stop_threshold = np.inf
     
     # a set must not contain duplicate numbers
     def _reproduce(self, parent: np.ndarray, match_counts: int):
@@ -208,7 +212,7 @@ if __name__ == "__main__":
         '1/5-rule-threshold': 0.1,
         '1/5-rule-iter': 50,
         '1/5-rule-alpha': 0.9,
-        'early_stop': True,
+        'early_stop': False,
         'early_stop-threshold': 10,
         'strategy': 'TOURNAMENT',
         "blending_cv2": blending_cv2
@@ -218,3 +222,4 @@ if __name__ == "__main__":
     info["EVOSAC_IMG"], info["EVOSAC_REC"], info["EVOSAC_TIME"] = evosac.run(folder, size)
     plot(info)
     print(info["EVOSAC_REC"])
+    pickle.dump(info, open("info.pkl", "wb"))
